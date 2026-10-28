@@ -2,13 +2,13 @@
 
 **Traffic Signal Intelligence: Gathering Metrics & Analytics**
 
-An open source replacement for ATSPM (Automated Traffic Signal Performance Measures).
+An open source ATSPM (Automated Traffic Signal Performance Measures) platform, built on the foundation laid by ATSPM 4.x and 5.x.
 
 ---
 
 ## Overview
 
-TSIGMA is a modern, modular platform for collecting, storing, and analyzing traffic signal performance data. It replaces the aging ATSPM codebase with a clean architecture built for scale, performance, and extensibility.
+TSIGMA is a modular platform for collecting, storing, and analyzing traffic signal performance data. It exists because of ATSPM: the measures, reports, and data model that ATSPM 4.x and 5.x brought to the industry are the basis for everything here. TSIGMA is not derived from ATSPM source code; it is a new implementation of the ideas ATSPM put forward, with an architecture aimed at large-scale deployments and extensibility.
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ TSIGMA is a modern, modular platform for collecting, storing, and analyzing traf
 
 ```bash
 # Clone repository
-git clone https://github.com/OpenPhase-Labs/TSIGMA.git
+git clone https://github.com/OpenPhase-Labs-Org/TSIGMA.git
 cd TSIGMA
 
 # Create virtual environment
@@ -57,31 +57,29 @@ curl http://localhost:8080/ready
 
 ---
 
-### Why Replace ATSPM?
+### Relationship to ATSPM 4.x and 5.x
+
+ATSPM 4.x and 5.x defined what traffic signal performance measures are and how agencies use them. TSIGMA follows those ideas and makes different implementation choices, mostly driven by very large signal counts and by the need to add vendors, transports, and reports without core changes. The table below describes those choices side by side; it is not a ranking.
 
 | Aspect | ATSPM 4.x | ATSPM 5.x | TSIGMA |
 |--------|-----------|-----------|--------|
-| Query performance | Hours | Hours | Seconds (on hot data) |
 | Event storage | Individual indexed rows | Compressed binary blobs | Individual indexed rows |
-| Event code queries | Direct SQL WHERE clause | Decompress → filter in app | Direct SQL WHERE clause |
-| Storage (10,000 Signals) | ~4+ TB / 1 month(unpartitioned) | Unknown (compressed; ratio not characterized) | ~2.5 TB / 1 month (partitioned with PostgreSQL) |
-| Architecture | 77 projects, 172K lines C# | 26 projects, 156K lines C# | Modular Python |
-| Deployment | Manual / IIS | Docker (6+ containers) | Docker (1-2 containers) |
-| Maintainability | Complex codebase | Microservices complexity | Clean, testable |
+| Event code queries | Direct SQL WHERE clause | Decompress, then filter in app | Direct SQL WHERE clause |
+| Language | C# (.NET Framework) | C# (.NET) | Python |
+| Deployment | IIS | Docker (microservices) | Docker (1-2 containers) |
 | Protocol support | FTP/FTPS, SNMP, TCP, UDP, SOAP | FTP, SFTP, HTTP, SNMP | Multi-protocol (FTP/FTPS/SFTP, HTTP, UDP, TCP, SOAP, NATS, MQTT, gRPC, directory watch) |
-| Database | MS-SQL only | Multi-DB (unoptimized) | Multi-DB (PostgreSQL + TimescaleDB preferred, MS-SQL, Oracle, MySQL) |
+| Database | MS-SQL | Multi-DB | Multi-DB (PostgreSQL + TimescaleDB preferred, MS-SQL, Oracle, MySQL) |
 | Frontend | ASP.NET | Angular SPA | Hybrid (server + Alpine.js) |
 | API style | REST (WCF + WebAPI 2 / .NET Framework) | REST (ASP.NET Core; ConfigApi / ReportApi / IdentityApi / WatchdogApi split) | REST (FastAPI w/ auto-OpenAPI) + GraphQL |
-| API documentation | Minimal / undocumented | Swagger/OpenAPI per service | Swagger/OpenAPI + GraphQL introspection at `/graphql` |
 | Response formats | JSON only | JSON only | JSON (default), CSV, or XML — selected via `?format=` query parameter or `Accept` header on every GET under `/api/v1/` |
 | Raw IHR event log API | Yes — `/api/data/controllerEventLogs*` (auth + record-cap gated) | None | Yes — `GET /api/v1/signals/{signal_id}/events` REST endpoint *and* GraphQL `events` query, both with the same filters (start, end, event_codes, event_param, limit) and same per-request cap |
-| Report API | Pre-aggregated data only (`/api/data/*Aggregate` endpoints, ~10); reports themselves rendered via WebForms — adding a new report requires C# code + recompile | One REST controller per report — adding a new report requires a new controller class + recompile | Plugin architecture: any module that registers via `@ReportRegistry.register("name")` is automatically discovered and exposed at `POST /api/v1/reports/{name}` (no code changes to the API layer). Generic `GET /api/v1/reports/` lists all registered reports; `/api/v1/reports/{name}/export` for CSV/JSON; plus 13 dedicated analytics endpoints under `/api/v1/analytics/*` |
+| Report API | Pre-aggregated data endpoints (`/api/data/*Aggregate`, ~10); reports rendered via WebForms | One REST controller per report | Plugin architecture: any module that registers via `@ReportRegistry.register("name")` is automatically discovered and exposed at `POST /api/v1/reports/{name}` (no code changes to the API layer). Generic `GET /api/v1/reports/` lists all registered reports; `/api/v1/reports/{name}/export` for CSV/JSON; plus 13 dedicated analytics endpoints under `/api/v1/analytics/*` |
 | Programmatic config CRUD | Limited (read-mostly) | Full (ConfigApi) | Full CRUD (signals, detectors, approaches, routes, corridors, regions, jurisdictions) |
 | Authentication | JWT bearer | ASP.NET Identity / OIDC | Session cookie + OIDC + OAuth2 |
 
-### Key Differences
+### Design Choices
 
-- **Queryable event storage.** Events are individually indexed rows. Queries by signal/event-code/time hit the index directly and return in milliseconds — no app-side decompression like ATSPM 5.x's compressed-blob model, no full-table scans like ATSPM 4.x's unpartitioned tables.
+- **Queryable event storage.** Events are individually indexed rows in time-partitioned tables, so queries by signal, event code, and time go straight to the index.
 - **Plugin architecture end-to-end.** Every extensible surface is a registry-driven plugin — add a new one with a one-line decorator and it's automatically discovered, exposed via REST, and surfaced in the UI. No controller class, no recompile, no core changes:
   - **Decoders** — `@DecoderRegistry.register` (ASC/3, Intelight MaxTime, Siemens, Peek, Wavetronics, OpenPhase Protobuf, CSV, auto-detect, …)
   - **Ingestion methods** — `@IngestionMethodRegistry.register` (FTP/FTPS/SFTP, HTTP, NATS, MQTT, gRPC, TCP, UDP, directory watch, SOAP, …)
@@ -90,12 +88,12 @@ curl http://localhost:8080/ready
   - **Storage backends** — `@StorageRegistry.register` (filesystem, S3, …)
   - **Scheduled jobs** — `@JobRegistry.register` (aggregation, compression, watchdog, …)
 
-  Adding support for a new controller vendor, a new transport, a new report, or a new validation pass is a single new file. ATSPM has none of this — every change requires editing core projects and recompiling the appropriate microservice.
-- **Multi-protocol streaming ingestion.** Native support for NATS, MQTT, gRPC, HTTP push, TCP/UDP listeners, directory watch, and SOAP — alongside traditional FTP/SFTP/HTTP polling. ATSPM is file-pull only.
-- **Database portability.** Runs on PostgreSQL (preferred, with TimescaleDB for compression/partitioning), MS-SQL, Oracle, or MySQL via a dialect abstraction layer. ATSPM 4.x is MS-SQL-only; 5.x claims multi-DB but is unoptimized for anything but its primary target.
-- **Modern API surface.** REST (FastAPI) with auto-generated OpenAPI docs, plus GraphQL with introspection. Raw IHR event log access remains available — ATSPM 5.x removed that capability entirely.
-- **Operational simplicity.** Runs in 1–2 Docker containers vs. ATSPM 5.x's 6+ microservices. Single modular Python codebase vs. 26–77 separate C# projects (156K–172K lines of C#) that you have to learn before contributing.
-- **Validation pipeline.** Built-in three-layer validation (schema/range, temporal/anomaly, cross-signal corridor) with a plugin SDK and per-deployment configurability. ATSPM has no equivalent — invalid data lands in the same table as good data.
+  Adding support for a new controller vendor, a new transport, a new report, or a new validation pass is a single new file.
+- **Multi-protocol streaming ingestion.** Native support for NATS, MQTT, gRPC, HTTP push, TCP/UDP listeners, directory watch, and SOAP, alongside traditional FTP/SFTP/HTTP polling.
+- **Database portability.** Runs on PostgreSQL (preferred, with TimescaleDB for compression/partitioning), MS-SQL, Oracle, or MySQL via a dialect abstraction layer.
+- **API surface.** REST (FastAPI) with auto-generated OpenAPI docs, plus GraphQL with introspection. Raw IHR event log access is available through both, as it was in ATSPM 4.x.
+- **Compact deployment.** Runs in 1-2 Docker containers from a single modular Python codebase.
+- **Validation pipeline.** Built-in three-layer validation (schema/range, temporal/anomaly, cross-signal corridor) with a plugin SDK and per-deployment configurability.
 
 ---
 
@@ -244,7 +242,7 @@ Currently shipped (29):
 
 TSIGMA provides a plugin interface for extending functionality. Modules can:
 
-- Read from TSIGMA's event storage (individual indexed rows, not compressed blobs)
+- Read from TSIGMA's event storage (individual indexed rows)
 - Add custom metrics and calculations
 - Provide additional charts and dashboards
 - Integrate external data sources
@@ -309,14 +307,6 @@ See [DATABASE_SCHEMA.md](docs/dev/DATABASE_SCHEMA.md#character-encoding) for det
 | **Hot (PostgreSQL)** | 3 weeks | ~2.5 TB | Fast (seconds) |
 | **Warm (TimescaleDB compression)** | Months | ~50 GB/week | Slower |
 | **Cold (Parquet)** | Years | ~50 GB/week | Slowest |
-
-**Comparison with ATSPM:**
-| Metric | ATSPM (MS-SQL) | TSIGMA (PostgreSQL) |
-|--------|----------------|---------------------|
-| Storage/week | ~1.4 TB | ~800 GB |
-| Index overhead | ~1 TB | Included |
-| Fragmentation | ~40% wasted | Minimal |
-| Query time | Hours | Seconds |
 
 **Storage strategy:**
 - Keep recent data (3 weeks) in PostgreSQL for fast queries
@@ -411,7 +401,6 @@ tsigma/
 | [UI_ARCHITECTURE.md](docs/dev/UI_ARCHITECTURE.md) | UI architecture |
 | [CODING_GUIDELINES.md](docs/dev/CODING_GUIDELINES.md) | Coding standards |
 | [TESTING.md](docs/dev/TESTING.md) | Testing guide |
-| [ATSPM_FEATURE_CATALOG.md](docs/dev/ATSPM_FEATURE_CATALOG.md) | ATSPM feature comparison |
 
 ---
 
@@ -419,7 +408,11 @@ tsigma/
 
 **OpenPhase Labs**
 
-TSIGMA is developed by OpenPhase Labs as an open source ATSPM replacement.
+TSIGMA is developed by OpenPhase Labs as an open source ATSPM platform.
+
+## Acknowledgments
+
+TSIGMA would not exist without ATSPM. The performance measures, reports, and data model it implements were developed and proven by the ATSPM 4.x and 5.x projects and the agencies, researchers, and engineers behind them. TSIGMA does not use ATSPM source code, but it follows the ideas they brought forward, and we are grateful for that work.
 
 ---
 
